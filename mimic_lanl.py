@@ -17,7 +17,7 @@ def get_spectrum(spec_file):
 
 	pc = 3.086e18 # parsec in cm
 	D = 10*pc # 10 parsecs
-	Llam / (4 * np.pi * D**2)
+	Llam /= (4 * np.pi * D**2)
 	
 	return Llam, lam
 
@@ -28,7 +28,8 @@ wind_models = [fname.replace('Xlan1e-1.0', 'Xlan1e-9.0') for fname in dyn_models
 
 n_sims = len(dyn_models_xlan_hi)*len(wind_models)
 
-for i in range(len(dyn_models_xlan_hi)//10):
+for i in range(len(dyn_models_xlan_hi)):
+#for i in range(20, 25, 1):
 	# load higher X_La fraction model (X_La = 0.1)
 	dyn_xlan_hi = h5py.File(dyn_models_xlan_hi[i], 'r')
 	# load lower X_La fraction model (X_La = 0.01)
@@ -42,9 +43,7 @@ for i in range(len(dyn_models_xlan_hi)//10):
 	times = np.array(dyn_xlan_lo['time'])
 	times = np.round(times/3600.0/24.0, 2) # days
 
-	# TODO: convolve spectra with filters, save all 3000 sims to an hdf5 file with individual keys for each band (grizyJHK)
-
-	for j in range(len(wind_models)//10):
+	for j in range(len(wind_models)):
 		wind = h5py.File(wind_models[j], 'r')
 		spec_wind, _ = get_spectrum(wind)
 
@@ -55,6 +54,10 @@ for i in range(len(dyn_models_xlan_hi)//10):
 		# take only spectral data where time is positive
 		time_positive = np.where(times > 0)[0]
 		spec_2c = spec_2c[time_positive, :]
+		
+		# NOTE: this is an artificial way of cleaning up spectra in preparation for emulator training!!
+		# clear up problem points with 0 flux by putting in near-zero fake data 
+		spec_2c[np.where(spec_2c <= 0)] = 1e-30
 	
 		params_dyn = dyn_models_xlan_hi[i].split('/')[1].split('_')[3:5]
 		params_wind = wind_models[j].split('/')[1].split('_')[3:5]
@@ -115,6 +118,24 @@ for i in range(spectra_array.shape[0]):
 		# ... by converting the spectra at each time to a broadband filter magnitude
 		for t in range(spec.shape[0]):
 			flux_band = spec_to_mags(wav, spec[t, :], band=b)
-			lc[b] = np.concatenate((lc[b], flux_band[0]), axis=0)
-	lcs[b] = np.concatenate((lcs[b], lc[b]), axis=0)
+			if np.isinf(flux_band[0]): print(params_array[i, :], b, times[t+time_idx_offset])
+			lc[b] = np.concatenate((lc[b], flux_band[0].reshape(1)), axis=0)
+		try:
+			lcs[b] = np.concatenate((lcs[b], lc[b][None, :]), axis=0)
+		except ValueError:
+			lcs[b] = lc[b][None, :]
+	print('finished %d of %d spectra' % (i+1, spectra_array.shape[0]))
+
 print(lcs)
+
+for band in bands:
+	print('writing light curves to hdf5...')
+	h5f = h5py.File('hdf5_data/lcs_%s.h5' % band, 'a')
+	header = h5f.create_dataset('header', (1))
+	header.attrs['units_magnitude'] = 'Absolute AB magnitude in %s-band' % band
+	header.attrs['spectra_array_structure'] = '[N, 250]: N = number of simulations, 250 = observation times'
+	header.attrs['observation_times'] = np.array2string(times, precision=4, max_line_width=50)
+	header.attrs['units_observation_times'] = 'days'
+	h5f.create_dataset('params', data=params_array, compression="gzip", chunks=True, maxshape=(None, 4)) 
+	h5f.create_dataset('spectra', data=lcs[band], compression="gzip", chunks=True, maxshape=(None, 250))
+	h5f.close()
