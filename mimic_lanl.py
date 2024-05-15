@@ -75,6 +75,8 @@ for i in range(len(dyn_models_xlan_hi)):
 
 	print('done with %d / %d dyn models' % (i*54+j, 54*55))
 
+times = times[time_positive]
+
 # save params + spectra arrays for future use
 print('writing spectra to hdf5...')
 h5f = h5py.File('hdf5_data/spectra.h5', 'a')
@@ -137,5 +139,5 @@ for band in bands:
 	header.attrs['observation_times'] = np.array2string(times, precision=4, max_line_width=50)
 	header.attrs['units_observation_times'] = 'days'
 	h5f.create_dataset('params', data=params_array, compression="gzip", chunks=True, maxshape=(None, 4)) 
-	h5f.create_dataset('spectra', data=lcs[band], compression="gzip", chunks=True, maxshape=(None, 250))
+	h5f.create_dataset('lcs', data=lcs[band], compression="gzip", chunks=True, maxshape=(None, 250))
 	h5f.close()
